@@ -120,6 +120,7 @@ def download_youtube_audio(youtube_url, output_path="./", format="mp3", quality=
 
 def transcribe_with_whisper(audio_file_path, model_size="base"):
     """Transcribe audio file using OpenAI's Whisper API."""
+    # Get API key from st.secrets or prompt the user.
     openai_api_key = OPENAI_API_KEY if OPENAI_API_KEY else st.text_input("Enter your OpenAI API Key", type="password")
     if not openai_api_key:
         st.error("OpenAI API key required for transcription")
@@ -129,7 +130,8 @@ def transcribe_with_whisper(audio_file_path, model_size="base"):
         openai.api_key = openai_api_key
         st.info("Generating transcript with OpenAI Whisper API... This may take a moment.")
         with open(audio_file_path, "rb") as audio_file:
-            transcript_response = openai.Audio.transcribe(
+            # Use the new transcriptions endpoint.
+            transcript_response = openai.Audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file
             )
@@ -148,7 +150,7 @@ def transcribe_with_whisper(audio_file_path, model_size="base"):
         return {
             "success": True,
             "transcript": text,
-            "language": "unknown",
+            "language": "unknown",  # The API does not return language info
             "segments": segments
         }
     except Exception as e:
