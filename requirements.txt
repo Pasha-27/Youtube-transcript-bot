@@ -5,3 +5,5 @@ scipy
 youtube-transcript-api
 openai==0.28
 yt-dlp
+whisper
+
