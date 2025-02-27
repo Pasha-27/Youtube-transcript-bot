@@ -6,9 +6,8 @@ import re
 from pathlib import Path
 import time
 import json
-import speech_recognition as sr
-from pydub import AudioSegment
 import tempfile
+import whisper
 
 def get_binary_file_downloader_html(bin_file, file_label='File'):
     """Generate a link to download a binary file."""
@@ -125,131 +124,59 @@ def download_youtube_audio(youtube_url, output_path="./", format="mp3", quality=
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def transcribe_audio(audio_file_path, duration):
-    """Transcribe audio file using Google's speech recognition."""
+def transcribe_with_whisper(audio_file_path, model_size="base"):
+    """Transcribe audio file using OpenAI's Whisper model."""
     try:
-        # Initialize recognizer
-        r = sr.Recognizer()
+        st.info(f"Loading Whisper {model_size} model... This may take a moment the first time.")
         
-        # For long audio files, split into chunks to avoid timeout issues
-        if duration > 60:  # If longer than 1 minute
-            return transcribe_long_audio(audio_file_path, duration)
+        # Load the Whisper model
+        model = whisper.load_model(model_size)
         
-        # Convert audio file to WAV format for processing if it's not already WAV
-        file_extension = os.path.splitext(audio_file_path)[1][1:].lower()
+        # Update status
+        st.info("Transcribing audio with Whisper... This may take a while depending on audio length.")
         
-        if file_extension == 'wav':
-            # If already WAV, use directly
-            with sr.AudioFile(audio_file_path) as source:
-                audio_data = r.record(source)
-                
-                # Use Google's speech recognition
-                transcript = r.recognize_google(audio_data)
-                return {"success": True, "transcript": transcript}
-        else:
-            # Convert to WAV first
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_wav:
-                temp_wav_path = temp_wav.name
-            
-            # Load audio and export as WAV
-            audio = AudioSegment.from_file(audio_file_path, format=file_extension)
-            audio.export(temp_wav_path, format="wav")
-            
-            # Process WAV file
-            with sr.AudioFile(temp_wav_path) as source:
-                audio_data = r.record(source)
-                
-                # Use Google's speech recognition
-                transcript = r.recognize_google(audio_data)
-                
-                # Clean up temporary file
-                os.unlink(temp_wav_path)
-                
-                return {"success": True, "transcript": transcript}
-    
-    except sr.UnknownValueError:
-        return {"success": False, "error": "Speech Recognition could not understand the audio"}
-    except sr.RequestError as e:
-        return {"success": False, "error": f"Could not request results from Speech Recognition service; {e}"}
-    except Exception as e:
-        return {"success": False, "error": f"Error transcribing audio: {str(e)}"}
-
-def transcribe_long_audio(audio_file_path, duration):
-    """Handle longer audio files by splitting into chunks."""
-    try:
-        # Load the audio file
-        file_extension = os.path.splitext(audio_file_path)[1][1:].lower()
-        audio = AudioSegment.from_file(audio_file_path, format=file_extension)
-        
-        # Initialize recognizer
-        r = sr.Recognizer()
-        
-        # Split into 30-second chunks
-        chunk_length_ms = 30 * 1000  # 30 seconds
-        chunks = [audio[i:i+chunk_length_ms] for i in range(0, len(audio), chunk_length_ms)]
-        
-        # Progress indicator
+        # Set up a progress bar
         progress_bar = st.progress(0)
-        status_text = st.empty()
-        status_text.info("Transcribing audio (this may take a while)...")
         
-        # Process each chunk
-        full_transcript = []
-        for i, chunk in enumerate(chunks):
-            # Update progress
-            progress = int((i / len(chunks)) * 100)
-            progress_bar.progress(progress)
-            status_text.info(f"Transcribing part {i+1} of {len(chunks)}...")
-            
-            # Export chunk to temporary WAV file
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_wav:
-                temp_wav_path = temp_wav.name
-            
-            chunk.export(temp_wav_path, format="wav")
-            
-            # Transcribe chunk
-            with sr.AudioFile(temp_wav_path) as source:
-                audio_data = r.record(source)
-                
-                try:
-                    # Use Google's speech recognition
-                    chunk_transcript = r.recognize_google(audio_data)
-                    full_transcript.append(chunk_transcript)
-                except sr.UnknownValueError:
-                    # If this chunk couldn't be transcribed, add a placeholder
-                    full_transcript.append("[Unclear audio]")
-                except sr.RequestError:
-                    # If there was a network error, try again after a delay
-                    time.sleep(2)
-                    try:
-                        chunk_transcript = r.recognize_google(audio_data)
-                        full_transcript.append(chunk_transcript)
-                    except:
-                        full_transcript.append("[Recognition error]")
-            
-            # Clean up temporary file
-            os.unlink(temp_wav_path)
-            
-            # Add a small delay to avoid hitting API rate limits
-            time.sleep(0.5)
+        # Transcribe the audio file
+        result = model.transcribe(
+            audio_file_path, 
+            fp16=False,  # Set to False for CPU-only machines
+            verbose=False
+        )
         
-        # Complete progress
+        # Update progress
         progress_bar.progress(100)
-        status_text.empty()
         
-        # Join all transcribed chunks
-        complete_transcript = " ".join(full_transcript)
+        # Extract the transcript and detected language
+        transcript = result["text"]
+        detected_language = result.get("language", "unknown")
         
-        return {"success": True, "transcript": complete_transcript}
+        # If there are segments with timestamps, extract them
+        segments = []
+        if "segments" in result:
+            for segment in result["segments"]:
+                segments.append({
+                    "start": segment["start"],
+                    "end": segment["end"],
+                    "text": segment["text"]
+                })
+        
+        return {
+            "success": True,
+            "transcript": transcript,
+            "language": detected_language,
+            "segments": segments
+        }
     
     except Exception as e:
-        return {"success": False, "error": f"Error transcribing long audio: {str(e)}"}
+        return {"success": False, "error": f"Error transcribing audio with Whisper: {str(e)}"}
 
 # Streamlit UI
-st.set_page_config(page_title="YouTube Audio & Transcript Downloader", page_icon="🎵")
+st.set_page_config(page_title="YouTube Audio & Whisper Transcript", page_icon="🎵")
 
-st.title("YouTube Audio & Transcript Downloader")
-st.markdown("Enter a YouTube URL to download its audio and generate a transcript")
+st.title("YouTube Audio & Whisper Transcript")
+st.markdown("Enter a YouTube URL to download its audio and generate a transcript using OpenAI's Whisper")
 
 # Check if yt-dlp is installed
 try:
@@ -265,18 +192,30 @@ except FileNotFoundError:
     ```
     """)
 
-# FFmpeg is available, so we don't need to check or warn
-
 # Input text box for YouTube URL
 youtube_url = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=...")
 
 # Advanced options
-with st.expander("Audio Options"):
+with st.expander("Options"):
     col1, col2 = st.columns(2)
     with col1:
+        st.subheader("Audio Options")
         audio_format = st.selectbox("Format", ["mp3", "m4a", "wav", "flac"], index=0)
-    with col2:
         audio_quality = st.selectbox("Quality", ["192", "256", "320", "best"], index=2)
+    with col2:
+        st.subheader("Transcription Options")
+        whisper_model = st.selectbox(
+            "Whisper Model", 
+            ["tiny", "base", "small", "medium", "large"], 
+            index=1,
+            help="Larger models are more accurate but slower and require more RAM"
+        )
+        
+        show_timestamps = st.checkbox(
+            "Show Timestamps", 
+            value=False,
+            help="Display timestamps for each segment of speech"
+        )
 
 # Create directories for downloads if they don't exist
 for dir_path in ["downloads", "transcripts"]:
@@ -315,8 +254,6 @@ if yt_dlp_installed and st.button("Download Audio"):
                 # Progress indicator
                 st.write("**Downloading audio...**")
                 progress_text = st.empty()
-                
-                # FFmpeg is available, so no warning needed
                 
                 # Download the audio
                 download_container = st.container()
@@ -359,65 +296,123 @@ if yt_dlp_installed and st.button("Download Audio"):
 
 # Only show the transcribe button if download is complete
 if st.session_state.download_complete and st.session_state.audio_file:
-    if st.button("Generate Transcript"):
+    if st.button("Generate Transcript with Whisper"):
         audio_info = st.session_state.audio_file
         
-        # Check if transcript file already exists to avoid regenerating
-        transcript_filename = os.path.splitext(audio_info['file_name'])[0] + ".txt"
-        transcript_path = os.path.join("transcripts", transcript_filename)
+        # Generate identifiers for the transcript files
+        base_filename = os.path.splitext(audio_info['file_name'])[0]
+        transcript_filename = f"{base_filename}_{whisper_model}.txt"
+        json_filename = f"{base_filename}_{whisper_model}.json"
         
-        if os.path.exists(transcript_path):
+        transcript_path = os.path.join("transcripts", transcript_filename)
+        json_path = os.path.join("transcripts", json_filename)
+        
+        # Check if transcript file already exists to avoid regenerating
+        if os.path.exists(transcript_path) and os.path.exists(json_path):
             # Load existing transcript
             with open(transcript_path, 'r', encoding='utf-8') as f:
                 transcript_text = f.read()
             
+            # Load JSON with segments
+            with open(json_path, 'r', encoding='utf-8') as f:
+                transcript_data = json.load(f)
+            
             st.session_state.transcript = {
                 "success": True, 
                 "transcript": transcript_text,
-                "file_path": transcript_path
+                "language": transcript_data.get("language", "unknown"),
+                "segments": transcript_data.get("segments", []),
+                "file_path": transcript_path,
+                "json_path": json_path
             }
-            st.success("Loaded existing transcript!")
+            
+            st.success(f"Loaded existing transcript (Whisper {whisper_model})!")
         else:
             # Generate new transcript
-            with st.spinner("Generating transcript... This may take a while depending on audio length"):
-                transcript_result = transcribe_audio(audio_info['file_path'], audio_info['duration'])
+            with st.spinner(f"Generating transcript with Whisper {whisper_model}... This may take a while."):
+                transcript_result = transcribe_with_whisper(
+                    audio_info['file_path'], 
+                    model_size=whisper_model
+                )
                 
                 if transcript_result["success"]:
-                    # Save transcript to file
+                    # Save transcript to text file
                     with open(transcript_path, 'w', encoding='utf-8') as f:
                         f.write(transcript_result["transcript"])
                     
+                    # Save full data to JSON for future use
+                    with open(json_path, 'w', encoding='utf-8') as f:
+                        json.dump({
+                            "language": transcript_result["language"],
+                            "segments": transcript_result["segments"]
+                        }, f, indent=2)
+                    
                     transcript_result["file_path"] = transcript_path
+                    transcript_result["json_path"] = json_path
                     st.session_state.transcript = transcript_result
-                    st.success("Transcript generated successfully!")
+                    
+                    st.success(f"Transcript generated successfully with Whisper {whisper_model}!")
+                    st.info(f"Detected language: {transcript_result['language']}")
                 else:
                     st.error(f"Transcription error: {transcript_result['error']}")
 
 # Display transcript if available
 if st.session_state.transcript and st.session_state.transcript["success"]:
     st.write("## Transcript")
-    st.write(st.session_state.transcript["transcript"])
     
-    # Provide download link for transcript
-    st.markdown(
-        get_binary_file_downloader_html(
-            st.session_state.transcript["file_path"], 
-            os.path.basename(st.session_state.transcript["file_path"])
-        ),
-        unsafe_allow_html=True
-    )
+    # Display detected language
+    st.write(f"**Detected Language:** {st.session_state.transcript['language']}")
+    
+    # Display transcript with or without timestamps
+    if show_timestamps and st.session_state.transcript.get("segments"):
+        # Create a formatted transcript with timestamps
+        st.write("### Transcript with Timestamps")
+        
+        for segment in st.session_state.transcript["segments"]:
+            start_time = time.strftime('%H:%M:%S', time.gmtime(segment["start"]))
+            end_time = time.strftime('%H:%M:%S', time.gmtime(segment["end"]))
+            st.write(f"**[{start_time} - {end_time}]** {segment['text']}")
+    else:
+        # Just display the full transcript
+        st.write(st.session_state.transcript["transcript"])
+    
+    # Provide download links for transcript formats
+    st.write("### Download Options")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown(
+            get_binary_file_downloader_html(
+                st.session_state.transcript["file_path"], 
+                os.path.basename(st.session_state.transcript["file_path"])
+            ),
+            unsafe_allow_html=True
+        )
+        st.caption("Download plain text transcript")
+    
+    with col2:
+        st.markdown(
+            get_binary_file_downloader_html(
+                st.session_state.transcript["json_path"], 
+                os.path.basename(st.session_state.transcript["json_path"])
+            ),
+            unsafe_allow_html=True
+        )
+        st.caption("Download JSON with timestamps")
 
 st.markdown("---")
 st.markdown("### How to use:")
 st.markdown("1. Paste a valid YouTube video URL in the input box")
 st.markdown("2. Adjust audio format and quality if needed")
-st.markdown("3. Click the 'Download Audio' button")
-st.markdown("4. Once download completes, click 'Generate Transcript' to create a transcript")
-st.markdown("5. Download the audio or transcript files as needed")
+st.markdown("3. Select Whisper model size (larger models are more accurate but slower)")
+st.markdown("4. Click the 'Download Audio' button")
+st.markdown("5. Once download completes, click 'Generate Transcript with Whisper'")
+st.markdown("6. View transcript and download files as needed")
 
 # Disclaimer
 st.markdown("---")
 st.caption("""
 ⚠️ Disclaimer: This application is for personal use only. Please respect copyright laws and YouTube's terms of service.
-The transcript feature uses Google's speech recognition API and may not be perfectly accurate, especially for longer videos or those with background noise.
+OpenAI's Whisper is an open-source speech recognition model that processes audio locally on your machine. 
+The larger model sizes will require more RAM and processing power, but generally provide more accurate results.
 """)
