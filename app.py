@@ -119,8 +119,7 @@ def download_youtube_audio(youtube_url, output_path="./", format="mp3", quality=
         return {"success": False, "error": str(e)}
 
 def transcribe_with_whisper(audio_file_path, model_size="base"):
-    """Transcribe audio file using OpenAI's Whisper API."""
-    # Get API key from st.secrets or prompt the user.
+    """Transcribe audio file using OpenAI's Whisper API with openai==0.28."""
     openai_api_key = OPENAI_API_KEY if OPENAI_API_KEY else st.text_input("Enter your OpenAI API Key", type="password")
     if not openai_api_key:
         st.error("OpenAI API key required for transcription")
@@ -130,7 +129,6 @@ def transcribe_with_whisper(audio_file_path, model_size="base"):
         openai.api_key = openai_api_key
         st.info("Generating transcript with OpenAI Whisper API... This may take a moment.")
         with open(audio_file_path, "rb") as audio_file:
-            # Use the new transcriptions endpoint.
             transcript_response = openai.Audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file
@@ -186,7 +184,7 @@ with st.expander("Options"):
             "Whisper Model", 
             ["tiny", "base", "small", "medium", "large"], 
             index=1,
-            help="Larger models are more accurate but slower and require more RAM (Note: The OpenAI API currently uses the whisper-1 model)"
+            help="Larger models are more accurate but slower and require more RAM (Note: This uses the whisper-1 model via OpenAI)"
         )
         show_timestamps = st.checkbox(
             "Show Timestamps", 
