@@ -1,4 +1,6 @@
 import streamlit as st
+st.set_page_config(page_title="YouTube Audio & Whisper Transcript", page_icon="🎵")
+
 import os
 import subprocess
 import base64
@@ -7,9 +9,6 @@ from pathlib import Path
 import time
 import json
 import tempfile
-
-# Set page config as the first command
-st.set_page_config(page_title="YouTube Audio & Whisper Transcript", page_icon="🎵")
 
 # Attempt to import whisper. If not installed, install openai-whisper.
 try:
@@ -130,7 +129,7 @@ def transcribe_with_whisper(audio_file_path, model_size="base"):
         openai.api_key = openai_api_key
         st.info("Generating transcript with OpenAI Whisper API... This may take a moment.")
         with open(audio_file_path, "rb") as audio_file:
-            transcript_response = openai.Audio.transcriptions.create(
+            transcript_response = openai.Audio.transcribe(
                 model="whisper-1",
                 file=audio_file
             )
