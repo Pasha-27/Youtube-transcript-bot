@@ -217,7 +217,7 @@ if yt_dlp_installed and st.button("Download Audio"):
     else:
         st.warning("Please enter a YouTube URL")
 
-st.markdown("---")
+"""st.markdown("---")
 st.markdown("### How to use:")
 st.markdown("1. Paste a valid YouTube video URL in the input box")
 st.markdown("2. Adjust audio format and quality if needed")
@@ -227,4 +227,4 @@ st.markdown("5. Use the download link or audio player to access your audio")
 
 # Disclaimer
 st.markdown("---")
-st.caption("⚠️ Disclaimer: This application is for personal use only. Please respect copyright laws and YouTube's terms of service.")
+st.caption("⚠️ Disclaimer: This application is for personal use only. Please respect copyright laws and YouTube's terms of service.")"""
