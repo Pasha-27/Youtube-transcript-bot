@@ -6,5 +6,3 @@ scipy
 youtube-transcript-api
 openai
 yt-dlp
-ffmpeg
-pytube
