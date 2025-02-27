@@ -6,3 +6,5 @@ scipy
 youtube-transcript-api
 openai
 yt-dlp
+SpeechRecognition
+pydub
