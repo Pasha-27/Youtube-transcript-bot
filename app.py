@@ -16,6 +16,20 @@ except ModuleNotFoundError:
     subprocess.check_call(["pip", "install", "openai-whisper", "--quiet"])
     import whisper
 
+# Load OpenAI API key from st.secrets if available
+@st.cache_resource
+def get_api_keys():
+    config = {"openai_api_key": None}
+    try:
+        if "OPENAI_API_KEY" in st.secrets:
+            config["openai_api_key"] = st.secrets["OPENAI_API_KEY"]
+    except Exception:
+        pass
+    return config
+
+api_keys = get_api_keys()
+OPENAI_API_KEY = api_keys["openai_api_key"]
+
 def get_binary_file_downloader_html(bin_file, file_label='File'):
     """Generate a link to download a binary file."""
     with open(bin_file, 'rb') as f:
@@ -132,58 +146,47 @@ def download_youtube_audio(youtube_url, output_path="./", format="mp3", quality=
         return {"success": False, "error": str(e)}
 
 def transcribe_with_whisper(audio_file_path, model_size="base"):
-    """Transcribe audio file using OpenAI's Whisper model."""
+    """Transcribe audio file using OpenAI's Whisper API."""
+    # Use API key from st.secrets or prompt the user if not available
+    openai_api_key = OPENAI_API_KEY if OPENAI_API_KEY else st.text_input("Enter your OpenAI API Key", type="password")
+    if not openai_api_key:
+        st.error("OpenAI API key required for transcription")
+        return {"success": False, "error": "No OpenAI API key provided"}
     try:
-        st.info(f"Loading Whisper {model_size} model... This may take a moment the first time.")
-        
-        # Load the Whisper model
-        model = whisper.load_model(model_size)
-        
-        # Update status
-        st.info("Transcribing audio with Whisper... This may take a while depending on audio length.")
-        
-        # Set up a progress bar
-        progress_bar = st.progress(0)
-        
-        # Transcribe the audio file
-        result = model.transcribe(
-            audio_file_path, 
-            fp16=False,
-            verbose=False
-        )
-        
-        # Update progress
-        progress_bar.progress(100)
-        
-        # Extract the transcript and detected language
-        transcript = result["text"]
-        detected_language = result.get("language", "unknown")
-        
-        # If there are segments with timestamps, extract them
+        import openai
+        openai.api_key = openai_api_key
+        st.info("Generating transcript with OpenAI Whisper API... This may take a moment.")
+        with open(audio_file_path, "rb") as audio_file:
+            transcript_response = openai.Audio.transcribe(
+                model="whisper-1",
+                file=audio_file
+            )
+        text = transcript_response["text"]
+        words = text.split()
         segments = []
-        if "segments" in result:
-            for segment in result["segments"]:
-                segments.append({
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "text": segment["text"]
-                })
-        
+        chunk_size = 10  # Number of words per segment
+        avg_duration = 2.5  # Average seconds per segment
+        for i in range(0, len(words), chunk_size):
+            chunk = " ".join(words[i:i+chunk_size])
+            segments.append({
+                "start": i / chunk_size * avg_duration,
+                "end": (i / chunk_size + 1) * avg_duration,
+                "text": chunk
+            })
         return {
             "success": True,
-            "transcript": transcript,
-            "language": detected_language,
+            "transcript": text,
+            "language": "unknown",  # The API doesn't return language info
             "segments": segments
         }
-    
     except Exception as e:
-        return {"success": False, "error": f"Error transcribing audio with Whisper: {str(e)}"}
+        return {"success": False, "error": f"Error transcribing audio with OpenAI: {str(e)}"}
 
 # Streamlit UI
 st.set_page_config(page_title="YouTube Audio & Whisper Transcript", page_icon="🎵")
 
 st.title("YouTube Audio & Whisper Transcript")
-st.markdown("Enter a YouTube URL to download its audio and generate a transcript using OpenAI's Whisper")
+st.markdown("Enter a YouTube URL to download its audio and generate a transcript using OpenAI's Whisper API")
 
 # Check if yt-dlp is installed
 try:
@@ -214,7 +217,7 @@ with st.expander("Options"):
             "Whisper Model", 
             ["tiny", "base", "small", "medium", "large"], 
             index=1,
-            help="Larger models are more accurate but slower and require more RAM"
+            help="Larger models are more accurate but slower and require more RAM (Note: The OpenAI API currently uses the whisper-1 model)"
         )
         
         show_timestamps = st.checkbox(
@@ -399,6 +402,6 @@ st.markdown("6. View transcript and download files as needed")
 st.markdown("---")
 st.caption("""
 ⚠️ Disclaimer: This application is for personal use only. Please respect copyright laws and YouTube's terms of service.
-OpenAI's Whisper is an open-source speech recognition model that processes audio locally on your machine. 
-The larger model sizes will require more RAM and processing power, but generally provide more accurate results.
+OpenAI's Whisper is an open-source speech recognition model that processes audio via the OpenAI API.
+The larger model sizes will require more RAM and processing power when used locally, so the API method is recommended.
 """)
