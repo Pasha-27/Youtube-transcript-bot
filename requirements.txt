@@ -7,4 +7,5 @@ youtube-transcript-api
 openai
 yt-dlp
 openai-whisper
+whisper
 torch
