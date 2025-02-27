@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 import time
 import json
-import requests  # Needed for calling the YouTube Data API
+import requests  # For calling the YouTube Data API
 
 # --- Optional: Attempt to import whisper (for local processing) ---
 try:
@@ -127,7 +127,6 @@ def transcribe_with_whisper(audio_file_path):
 
 def extract_video_id(url):
     """Extract the video ID from a YouTube URL."""
-    # This regex attempts to cover common YouTube URL formats.
     regex = r"(?:v=|\/)([0-9A-Za-z_-]{11}).*"
     match = re.search(regex, url)
     if match:
@@ -135,7 +134,7 @@ def extract_video_id(url):
     return None
 
 def get_youtube_comments(video_id, api_key, max_results=100):
-    """Fetch top comments for a video using YouTube Data API v3."""
+    """Fetch top comments for a video using YouTube Data API v3 and sort by like count."""
     api_url = "https://www.googleapis.com/youtube/v3/commentThreads"
     params = {
         "part": "snippet",
@@ -154,15 +153,56 @@ def get_youtube_comments(video_id, api_key, max_results=100):
         snippet = item["snippet"]["topLevelComment"]["snippet"]
         author = snippet.get("authorDisplayName", "Unknown")
         text = snippet.get("textDisplay", "")
-        comments.append(f"{author}: {text}")
-    return {"success": True, "comments": comments}
+        like_count = snippet.get("likeCount", 0)
+        comments.append({"author": author, "text": text, "likeCount": like_count})
+    # Sort comments by like count (highest first)
+    comments_sorted = sorted(comments, key=lambda x: x["likeCount"], reverse=True)
+    comments_sorted = comments_sorted[:max_results]
+    return {"success": True, "comments": comments_sorted}
+
+def analyze_comments_and_transcript(transcript, comments):
+    """Use OpenAI to analyze the transcript and comments to determine what viewers find useful."""
+    import openai
+    api_key = OPENAI_API_KEY if OPENAI_API_KEY else st.text_input("Enter your OpenAI API Key", type="password", key="openai_api_key_analyze")
+    if not api_key:
+        st.error("OpenAI API key is required for analysis.")
+        return None
+    openai.api_key = api_key
+    # Prepare the prompt by joining all comments with like counts.
+    comments_text = "\n".join([f"{c['author']}: {c['text']} (Likes: {c['likeCount']})" for c in comments])
+    prompt = (
+        "Below is the transcript of a YouTube video and the top comments (sorted by likes) from viewers. "
+        "Analyze the comments to identify and list the specific aspects of the video that people are finding useful. "
+        "Use the transcript to help find correlations between the content and the feedback. "
+        "Present your findings as a bullet-point list of common themes or features mentioned in the comments.\n\n"
+        "Transcript:\n"
+        f"{transcript}\n\n"
+        "Comments:\n"
+        f"{comments_text}\n\n"
+        "Findings:"
+    )
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant analyzing video transcripts and comments."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.5,
+            max_tokens=400,
+        )
+        analysis = response["choices"][0]["message"]["content"]
+        return analysis
+    except Exception as e:
+        st.error(f"Error during analysis: {str(e)}")
+        return None
 
 # --- Streamlit Application UI ---
 
 st.title("YouTube Audio & Whisper Transcript")
 st.markdown(
     "Enter a YouTube URL below, then click **Download Audio** to extract the audio. Once downloaded, click **Generate Transcript** to convert the audio to text using OpenAI's Whisper API. "
-    "You can also view the top 100 comments from the video."
+    "You can also view the top 100 comments (sorted by likes) and analyze what people find useful about the video."
 )
 
 youtube_url = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=...")
@@ -185,6 +225,7 @@ if "audio_file" in st.session_state and st.session_state.audio_file:
         if transcript_result["success"]:
             st.success("Transcript generated successfully!")
             st.text_area("Transcript", transcript_result["transcript"], height=300)
+            st.session_state.transcript = transcript_result["transcript"]
         else:
             st.error(transcript_result["error"])
 
@@ -196,7 +237,7 @@ if st.button("Show Top 100 Comments"):
             st.error("Could not extract video ID from the URL.")
         else:
             # Check for YouTube API key
-            youtube_api_key = YOUTUBE_API_KEY if YOUTUBE_API_KEY else st.text_input("Enter your YouTube API Key", type="password", key="youtube_api_key")
+            youtube_api_key = YOUTUBE_API_KEY if YOUTUBE_API_KEY else st.text_input("Enter your YouTube API Key", type="password", key="youtube_api_key_comments")
             if not youtube_api_key:
                 st.error("YouTube API key is required to fetch comments.")
             else:
@@ -204,15 +245,26 @@ if st.button("Show Top 100 Comments"):
                 comments_result = get_youtube_comments(video_id, youtube_api_key)
                 if comments_result["success"]:
                     comments = comments_result["comments"]
-                    if comments:
-                        st.success(f"Fetched {len(comments)} comments.")
-                        # Display comments in an expander for better readability
-                        with st.expander("Top Comments"):
-                            for comment in comments:
-                                st.write(comment)
-                    else:
-                        st.info("No comments found for this video.")
+                    st.session_state.comments = comments  # store comments for later analysis
+                    st.success(f"Fetched {len(comments)} comments.")
+                    with st.expander("Top Comments"):
+                        for comment in comments:
+                            st.write(f"{comment['author']}: {comment['text']} (Likes: {comment['likeCount']})")
                 else:
                     st.error(f"Error fetching comments: {comments_result['error']}")
     else:
         st.warning("Please enter a valid YouTube URL.")
+
+# --- Section to analyze comments and transcript ---
+if st.button("Analyze Comments & Transcript"):
+    if "transcript" not in st.session_state or not st.session_state.transcript:
+        st.error("Transcript not available. Please generate the transcript first.")
+    elif "comments" not in st.session_state or not st.session_state.comments:
+        st.error("Comments not available. Please fetch the comments first.")
+    else:
+        st.info("Analyzing transcript and comments. This might take a moment...")
+        analysis = analyze_comments_and_transcript(st.session_state.transcript, st.session_state.comments)
+        if analysis:
+            st.success("Analysis complete!")
+            st.markdown("### What Viewers Find Useful:")
+            st.markdown(analysis)
