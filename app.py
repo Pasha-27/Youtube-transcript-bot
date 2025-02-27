@@ -3,25 +3,19 @@ import os
 import subprocess
 
 def download_audio(youtube_url, format="mp3"):
-    """Downloads the audio from a YouTube video and returns the file path."""
     output_dir = "downloads"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f"audio.{format}")
 
-    command = [
-        "yt-dlp",
-        "-x",  # Extract audio
-        "--audio-format", format,  # Specify format
-        "-o", output_path,  # Output path
-        youtube_url
-    ]
+    command = f'yt-dlp -x --audio-format {format} -o "{output_path}" "{youtube_url}"'
 
     try:
-        subprocess.run(command, check=True)
+        subprocess.run(command, shell=True, check=True)  # Use shell=True
         return output_path
     except subprocess.CalledProcessError as e:
         st.error(f"Error: {e}")
         return None
+
 
 # Streamlit UI
 st.title("YouTube Audio Downloader")
