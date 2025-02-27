@@ -34,6 +34,7 @@ def get_video_info(youtube_url):
             "yt-dlp", 
             "--dump-json", 
             "--no-playlist", 
+            "--quiet",  # Added quiet flag to suppress logs
             youtube_url
         ]
         
@@ -56,7 +57,7 @@ def get_video_info(youtube_url):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def download_youtube_audio(youtube_url, output_path="./", format="mp3", quality="192", ffmpeg_available=True):
+def download_youtube_audio(youtube_url, output_path="./", format="mp3", quality="192"):
     """Download audio from a YouTube video URL using yt-dlp."""
     try:
         # Get video info first
@@ -69,52 +70,36 @@ def download_youtube_audio(youtube_url, output_path="./", format="mp3", quality=
         
         # Create sanitized filename
         base_filename = clean_filename(title)
+        output_file = f"{output_path}/{base_filename}.{format}"
         
-        # Determine if we can convert audio format (requires FFmpeg)
-        if ffmpeg_available:
-            output_file = f"{output_path}/{base_filename}.{format}"
-            # Prepare the yt-dlp command with audio conversion
-            command = [
-                "yt-dlp",
-                "-f", "bestaudio",
-                "--extract-audio",
-                "--audio-format", format,
-                "--audio-quality", quality,
-                "-o", output_file,
-                "--no-playlist",
-                youtube_url
-            ]
-        else:
-            # If FFmpeg is not available, just download the best audio without conversion
-            output_file = f"{output_path}/{base_filename}.%(ext)s"
-            command = [
-                "yt-dlp",
-                "-f", "bestaudio",
-                "-o", output_file,
-                "--no-playlist",
-                youtube_url
-            ]
+        # Prepare the yt-dlp command with audio conversion
+        command = [
+            "yt-dlp",
+            "-f", "bestaudio",
+            "--extract-audio",
+            "--audio-format", format,
+            "--audio-quality", quality,
+            "-o", output_file,
+            "--no-playlist",
+            "--quiet",  # Added quiet flag to suppress logs
+            "--progress",  # Still track progress but with minimal output
+            youtube_url
+        ]
         
-        # Run the command
-        process = subprocess.Popen(
-            command, 
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True
-        )
+        # Show a progress bar instead of logs
+        progress_bar = st.progress(0)
+        status_text = st.empty()
         
-        # Real-time output processing
-        while True:
-            output = process.stdout.readline()
-            if output == '' and process.poll() is not None:
-                break
-            if output:
-                st.text(output.strip())
+        # Run the command without showing output
+        process = subprocess.run(command, capture_output=True, text=True)
         
         # Check for errors
-        stderr = process.stderr.read()
         if process.returncode != 0:
-            return {"success": False, "error": stderr}
+            return {"success": False, "error": process.stderr}
+        
+        # Update progress bar to complete
+        progress_bar.progress(100)
+        status_text.empty()
         
         # Check if file exists
         if not os.path.exists(output_file):
@@ -144,6 +129,7 @@ st.markdown("Enter a YouTube URL to download its audio")
 
 # Check if yt-dlp is installed
 try:
+    # Run with quiet flag to hide version output
     subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True)
     yt_dlp_installed = True
 except FileNotFoundError:
@@ -155,34 +141,7 @@ except FileNotFoundError:
     ```
     """)
 
-# Check if FFmpeg is installed
-try:
-    subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
-    ffmpeg_installed = True
-except FileNotFoundError:
-    ffmpeg_installed = False
-    st.warning("""
-    FFmpeg is not installed. FFmpeg is required for audio conversion.
-    
-    Installation instructions:
-    
-    Windows:
-    1. Download from https://ffmpeg.org/download.html or use Chocolatey: `choco install ffmpeg`
-    2. Add to PATH
-    
-    macOS:
-    ```
-    brew install ffmpeg
-    ```
-    
-    Ubuntu/Debian:
-    ```
-    sudo apt update
-    sudo apt install ffmpeg
-    ```
-    
-    The app will still work but might only download in the original format.
-    """)
+# FFmpeg is available, so we don't need to check or warn
 
 # Input text box for YouTube URL
 youtube_url = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=...")
@@ -201,51 +160,55 @@ if not os.path.exists("downloads"):
 
 if yt_dlp_installed and st.button("Download Audio"):
     if youtube_url:
-        with st.spinner("Processing..."):
+        with st.spinner("Processing video information..."):
             # Get video info first
             info = get_video_info(youtube_url)
             
             if info["success"]:
-                st.image(info["thumbnail"], width=250)
-                st.write(f"**Title:** {info['title']}")
-                st.write(f"**Channel:** {info['uploader']}")
-                st.write(f"**Duration:** {time.strftime('%H:%M:%S', time.gmtime(info['duration']))}")
-            
-                # Progress indicator
-                progress_text = st.empty()
-                progress_text.info("Starting download...")
+                # Create a container for the video information
+                video_info_container = st.container()
+                with video_info_container:
+                    col1, col2 = st.columns([1, 2])
+                    with col1:
+                        st.image(info["thumbnail"], width=180)
+                    with col2:
+                        st.write(f"**Title:** {info['title']}")
+                        st.write(f"**Channel:** {info['uploader']}")
+                        st.write(f"**Duration:** {time.strftime('%H:%M:%S', time.gmtime(info['duration']))}")
                 
-                # Show FFmpeg warning if needed
-                if not ffmpeg_installed and audio_format != "m4a":
-                    progress_text.warning(
-                        "FFmpeg not found. Will download in original format instead of " + 
-                        f"{audio_format}. Install FFmpeg for format conversion."
-                    )
-                    time.sleep(2)  # Give user time to read
+                # Progress indicator
+                st.write("**Downloading audio...**")
+                progress_text = st.empty()
+                
+                # FFmpeg is available, so no warning needed
                 
                 # Download the audio
-                result = download_youtube_audio(
-                    youtube_url, 
-                    output_path="downloads", 
-                    format=audio_format,
-                    quality=audio_quality,
-                    ffmpeg_available=ffmpeg_installed
-                )
+                download_container = st.container()
+                with download_container:
+                    result = download_youtube_audio(
+                        youtube_url, 
+                        output_path="downloads", 
+                        format=audio_format,
+                        quality=audio_quality
+                    )
                 
                 if result["success"]:
                     progress_text.empty()
                     st.success(f"Download completed! 🎉")
                     
                     # Provide download link
-                    st.markdown(
-                        get_binary_file_downloader_html(result['file_path'], result['file_name']),
-                        unsafe_allow_html=True
-                    )
-                    
-                    # Display audio player
-                    audio_file = open(result['file_path'], 'rb')
-                    audio_bytes = audio_file.read()
-                    st.audio(audio_bytes, format=f'audio/{audio_format}')
+                    download_container = st.container()
+                    with download_container:
+                        st.markdown(
+                            get_binary_file_downloader_html(result['file_path'], result['file_name']),
+                            unsafe_allow_html=True
+                        )
+                        
+                        # Display audio player
+                        audio_file = open(result['file_path'], 'rb')
+                        audio_bytes = audio_file.read()
+                        file_extension = os.path.splitext(result['file_name'])[1][1:]  # Get extension without dot
+                        st.audio(audio_bytes, format=f'audio/{file_extension}')
                 else:
                     progress_text.empty()
                     st.error(f"Error: {result['error']}")
@@ -256,12 +219,11 @@ if yt_dlp_installed and st.button("Download Audio"):
 
 st.markdown("---")
 st.markdown("### How to use:")
-st.markdown("1. Make sure yt-dlp is installed (`pip install yt-dlp`)")
-st.markdown("2. Paste a valid YouTube video URL in the input box")
-st.markdown("3. Adjust audio format and quality if needed")
-st.markdown("4. Click the 'Download Audio' button")
-st.markdown("5. Wait for the download to complete")
-st.markdown("6. Use the download link or audio player to access your audio")
+st.markdown("1. Paste a valid YouTube video URL in the input box")
+st.markdown("2. Adjust audio format and quality if needed")
+st.markdown("3. Click the 'Download Audio' button")
+st.markdown("4. Wait for the download to complete")
+st.markdown("5. Use the download link or audio player to access your audio")
 
 # Disclaimer
 st.markdown("---")
