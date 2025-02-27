@@ -1,4 +1,6 @@
 import streamlit as st
+st.set_page_config(page_title="YouTube Audio & Whisper Transcript", page_icon="🎵")
+
 import os
 import subprocess
 import base64
@@ -12,7 +14,8 @@ import tempfile
 try:
     import whisper
 except ModuleNotFoundError:
-    st.info("Installing openai-whisper package...")
+    # Use print instead of st.info here to avoid early Streamlit commands
+    print("Installing openai-whisper package...")
     subprocess.check_call(["pip", "install", "openai-whisper", "--quiet"])
     import whisper
 
@@ -40,11 +43,8 @@ def get_binary_file_downloader_html(bin_file, file_label='File'):
 
 def clean_filename(filename):
     """Clean the filename to remove invalid characters"""
-    # Replace invalid characters with underscore
     cleaned = re.sub(r'[\\/*?:"<>|]', "_", filename)
-    # Remove leading/trailing spaces and dots
     cleaned = cleaned.strip('. ')
-    # Limit length
     if len(cleaned) > 100:
         cleaned = cleaned[:100]
     return cleaned
@@ -52,7 +52,6 @@ def clean_filename(filename):
 def get_video_info(youtube_url):
     """Get information about the video without downloading it."""
     try:
-        # Use yt-dlp to get video information in JSON format
         command = [
             "yt-dlp", 
             "--dump-json", 
@@ -60,15 +59,10 @@ def get_video_info(youtube_url):
             "--quiet",
             youtube_url
         ]
-        
         result = subprocess.run(command, capture_output=True, text=True)
-        
         if result.returncode != 0:
             return {"success": False, "error": result.stderr}
-        
-        # Parse the JSON output
         video_info = json.loads(result.stdout)
-        
         return {
             "success": True,
             "title": video_info.get("title", "Unknown Title"),
@@ -76,26 +70,19 @@ def get_video_info(youtube_url):
             "duration": video_info.get("duration", 0),
             "thumbnail": video_info.get("thumbnail", "")
         }
-        
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 def download_youtube_audio(youtube_url, output_path="./", format="mp3", quality="192"):
     """Download audio from a YouTube video URL using yt-dlp."""
     try:
-        # Get video info first
         info = get_video_info(youtube_url)
         if not info["success"]:
             return info
-        
         title = info["title"]
         uploader = info["uploader"]
-        
-        # Create sanitized filename
         base_filename = clean_filename(title)
         output_file = f"{output_path}/{base_filename}.{format}"
-        
-        # Prepare the yt-dlp command with audio conversion
         command = [
             "yt-dlp",
             "-f", "bestaudio",
@@ -108,31 +95,19 @@ def download_youtube_audio(youtube_url, output_path="./", format="mp3", quality=
             "--progress",
             youtube_url
         ]
-        
-        # Show a progress bar instead of logs
         progress_bar = st.progress(0)
         status_text = st.empty()
-        
-        # Run the command without showing output
         process = subprocess.run(command, capture_output=True, text=True)
-        
-        # Check for errors
         if process.returncode != 0:
             return {"success": False, "error": process.stderr}
-        
-        # Update progress bar to complete
         progress_bar.progress(100)
         status_text.empty()
-        
-        # Check if file exists
         if not os.path.exists(output_file):
-            # yt-dlp sometimes adds extensions, so try to find the file
             potential_files = list(Path(output_path).glob(f"{base_filename}.*"))
             if potential_files:
                 output_file = str(potential_files[0])
             else:
                 return {"success": False, "error": "File not found after download"}
-        
         return {
             "success": True,
             "file_path": output_file,
@@ -141,13 +116,11 @@ def download_youtube_audio(youtube_url, output_path="./", format="mp3", quality=
             "file_name": os.path.basename(output_file),
             "duration": info["duration"]
         }
-        
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 def transcribe_with_whisper(audio_file_path, model_size="base"):
     """Transcribe audio file using OpenAI's Whisper API."""
-    # Use API key from st.secrets or prompt the user if not available
     openai_api_key = OPENAI_API_KEY if OPENAI_API_KEY else st.text_input("Enter your OpenAI API Key", type="password")
     if not openai_api_key:
         st.error("OpenAI API key required for transcription")
@@ -176,19 +149,16 @@ def transcribe_with_whisper(audio_file_path, model_size="base"):
         return {
             "success": True,
             "transcript": text,
-            "language": "unknown",  # The API doesn't return language info
+            "language": "unknown",
             "segments": segments
         }
     except Exception as e:
         return {"success": False, "error": f"Error transcribing audio with OpenAI: {str(e)}"}
 
-# Streamlit UI
-st.set_page_config(page_title="YouTube Audio & Whisper Transcript", page_icon="🎵")
-
+# --- Streamlit UI below ---
 st.title("YouTube Audio & Whisper Transcript")
 st.markdown("Enter a YouTube URL to download its audio and generate a transcript using OpenAI's Whisper API")
 
-# Check if yt-dlp is installed
 try:
     subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True)
     yt_dlp_installed = True
@@ -201,10 +171,8 @@ except FileNotFoundError:
     ```
     """)
 
-# Input text box for YouTube URL
 youtube_url = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=...")
 
-# Advanced options
 with st.expander("Options"):
     col1, col2 = st.columns(2)
     with col1:
@@ -219,19 +187,16 @@ with st.expander("Options"):
             index=1,
             help="Larger models are more accurate but slower and require more RAM (Note: The OpenAI API currently uses the whisper-1 model)"
         )
-        
         show_timestamps = st.checkbox(
             "Show Timestamps", 
             value=False,
             help="Display timestamps for each segment of speech"
         )
 
-# Create directories for downloads if they don't exist
 for dir_path in ["downloads", "transcripts"]:
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
 
-# Global state for transcript
 if 'transcript' not in st.session_state:
     st.session_state.transcript = None
 if 'audio_file' not in st.session_state:
@@ -243,13 +208,9 @@ if yt_dlp_installed and st.button("Download Audio"):
     if youtube_url:
         st.session_state.transcript = None
         st.session_state.download_complete = False
-        
         with st.spinner("Processing video information..."):
-            # Get video info first
             info = get_video_info(youtube_url)
-            
             if info["success"]:
-                # Create a container for the video information
                 video_info_container = st.container()
                 with video_info_container:
                     col1, col2 = st.columns([1, 2])
@@ -259,10 +220,8 @@ if yt_dlp_installed and st.button("Download Audio"):
                         st.write(f"**Title:** {info['title']}")
                         st.write(f"**Channel:** {info['uploader']}")
                         st.write(f"**Duration:** {time.strftime('%H:%M:%S', time.gmtime(info['duration']))}")
-                
                 st.write("**Downloading audio...**")
                 progress_text = st.empty()
-                
                 download_container = st.container()
                 with download_container:
                     result = download_youtube_audio(
@@ -271,21 +230,17 @@ if yt_dlp_installed and st.button("Download Audio"):
                         format=audio_format,
                         quality=audio_quality
                     )
-                
                 if result["success"]:
                     progress_text.empty()
-                    st.success(f"Download completed! 🎉")
-                    
+                    st.success("Download completed! 🎉")
                     st.session_state.audio_file = result
                     st.session_state.download_complete = True
-                    
                     download_container = st.container()
                     with download_container:
                         st.markdown(
                             get_binary_file_downloader_html(result['file_path'], result['file_name']),
                             unsafe_allow_html=True
                         )
-                        
                         audio_file = open(result['file_path'], 'rb')
                         audio_bytes = audio_file.read()
                         file_extension = os.path.splitext(result['file_name'])[1][1:]
@@ -301,21 +256,16 @@ if yt_dlp_installed and st.button("Download Audio"):
 if st.session_state.download_complete and st.session_state.audio_file:
     if st.button("Generate Transcript with Whisper"):
         audio_info = st.session_state.audio_file
-        
         base_filename = os.path.splitext(audio_info['file_name'])[0]
         transcript_filename = f"{base_filename}_{whisper_model}.txt"
         json_filename = f"{base_filename}_{whisper_model}.json"
-        
         transcript_path = os.path.join("transcripts", transcript_filename)
         json_path = os.path.join("transcripts", json_filename)
-        
         if os.path.exists(transcript_path) and os.path.exists(json_path):
             with open(transcript_path, 'r', encoding='utf-8') as f:
                 transcript_text = f.read()
-            
             with open(json_path, 'r', encoding='utf-8') as f:
                 transcript_data = json.load(f)
-            
             st.session_state.transcript = {
                 "success": True, 
                 "transcript": transcript_text,
@@ -324,7 +274,6 @@ if st.session_state.download_complete and st.session_state.audio_file:
                 "file_path": transcript_path,
                 "json_path": json_path
             }
-            
             st.success(f"Loaded existing transcript (Whisper {whisper_model})!")
         else:
             with st.spinner(f"Generating transcript with Whisper {whisper_model}... This may take a while."):
@@ -332,21 +281,17 @@ if st.session_state.download_complete and st.session_state.audio_file:
                     audio_info['file_path'], 
                     model_size=whisper_model
                 )
-                
                 if transcript_result["success"]:
                     with open(transcript_path, 'w', encoding='utf-8') as f:
                         f.write(transcript_result["transcript"])
-                    
                     with open(json_path, 'w', encoding='utf-8') as f:
                         json.dump({
                             "language": transcript_result["language"],
                             "segments": transcript_result["segments"]
                         }, f, indent=2)
-                    
                     transcript_result["file_path"] = transcript_path
                     transcript_result["json_path"] = json_path
                     st.session_state.transcript = transcript_result
-                    
                     st.success(f"Transcript generated successfully with Whisper {whisper_model}!")
                     st.info(f"Detected language: {transcript_result['language']}")
                 else:
@@ -354,22 +299,17 @@ if st.session_state.download_complete and st.session_state.audio_file:
 
 if st.session_state.transcript and st.session_state.transcript["success"]:
     st.write("## Transcript")
-    
     st.write(f"**Detected Language:** {st.session_state.transcript['language']}")
-    
     if show_timestamps and st.session_state.transcript.get("segments"):
         st.write("### Transcript with Timestamps")
-        
         for segment in st.session_state.transcript["segments"]:
             start_time = time.strftime('%H:%M:%S', time.gmtime(segment["start"]))
             end_time = time.strftime('%H:%M:%S', time.gmtime(segment["end"]))
             st.write(f"**[{start_time} - {end_time}]** {segment['text']}")
     else:
         st.write(st.session_state.transcript["transcript"])
-    
     st.write("### Download Options")
     col1, col2 = st.columns(2)
-    
     with col1:
         st.markdown(
             get_binary_file_downloader_html(
@@ -379,7 +319,6 @@ if st.session_state.transcript and st.session_state.transcript["success"]:
             unsafe_allow_html=True
         )
         st.caption("Download plain text transcript")
-    
     with col2:
         st.markdown(
             get_binary_file_downloader_html(
@@ -398,7 +337,6 @@ st.markdown("3. Select Whisper model size (larger models are more accurate but s
 st.markdown("4. Click the 'Download Audio' button")
 st.markdown("5. Once download completes, click 'Generate Transcript with Whisper'")
 st.markdown("6. View transcript and download files as needed")
-
 st.markdown("---")
 st.caption("""
 ⚠️ Disclaimer: This application is for personal use only. Please respect copyright laws and YouTube's terms of service.
