@@ -7,7 +7,14 @@ from pathlib import Path
 import time
 import json
 import tempfile
-import whisper
+
+# Attempt to import whisper. If not installed, install openai-whisper.
+try:
+    import whisper
+except ModuleNotFoundError:
+    st.info("Installing openai-whisper package...")
+    subprocess.check_call(["pip", "install", "openai-whisper", "--quiet"])
+    import whisper
 
 def get_binary_file_downloader_html(bin_file, file_label='File'):
     """Generate a link to download a binary file."""
@@ -36,7 +43,7 @@ def get_video_info(youtube_url):
             "yt-dlp", 
             "--dump-json", 
             "--no-playlist", 
-            "--quiet",  # Added quiet flag to suppress logs
+            "--quiet",
             youtube_url
         ]
         
@@ -83,8 +90,8 @@ def download_youtube_audio(youtube_url, output_path="./", format="mp3", quality=
             "--audio-quality", quality,
             "-o", output_file,
             "--no-playlist",
-            "--quiet",  # Added quiet flag to suppress logs
-            "--progress",  # Still track progress but with minimal output
+            "--quiet",
+            "--progress",
             youtube_url
         ]
         
@@ -141,7 +148,7 @@ def transcribe_with_whisper(audio_file_path, model_size="base"):
         # Transcribe the audio file
         result = model.transcribe(
             audio_file_path, 
-            fp16=False,  # Set to False for CPU-only machines
+            fp16=False,
             verbose=False
         )
         
@@ -180,7 +187,6 @@ st.markdown("Enter a YouTube URL to download its audio and generate a transcript
 
 # Check if yt-dlp is installed
 try:
-    # Run with quiet flag to hide version output
     subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True)
     yt_dlp_installed = True
 except FileNotFoundError:
@@ -251,11 +257,9 @@ if yt_dlp_installed and st.button("Download Audio"):
                         st.write(f"**Channel:** {info['uploader']}")
                         st.write(f"**Duration:** {time.strftime('%H:%M:%S', time.gmtime(info['duration']))}")
                 
-                # Progress indicator
                 st.write("**Downloading audio...**")
                 progress_text = st.empty()
                 
-                # Download the audio
                 download_container = st.container()
                 with download_container:
                     result = download_youtube_audio(
@@ -269,11 +273,9 @@ if yt_dlp_installed and st.button("Download Audio"):
                     progress_text.empty()
                     st.success(f"Download completed! 🎉")
                     
-                    # Store audio file path in session state
                     st.session_state.audio_file = result
                     st.session_state.download_complete = True
                     
-                    # Provide download link
                     download_container = st.container()
                     with download_container:
                         st.markdown(
@@ -281,10 +283,9 @@ if yt_dlp_installed and st.button("Download Audio"):
                             unsafe_allow_html=True
                         )
                         
-                        # Display audio player
                         audio_file = open(result['file_path'], 'rb')
                         audio_bytes = audio_file.read()
-                        file_extension = os.path.splitext(result['file_name'])[1][1:]  # Get extension without dot
+                        file_extension = os.path.splitext(result['file_name'])[1][1:]
                         st.audio(audio_bytes, format=f'audio/{file_extension}')
                 else:
                     progress_text.empty()
@@ -294,12 +295,10 @@ if yt_dlp_installed and st.button("Download Audio"):
     else:
         st.warning("Please enter a YouTube URL")
 
-# Only show the transcribe button if download is complete
 if st.session_state.download_complete and st.session_state.audio_file:
     if st.button("Generate Transcript with Whisper"):
         audio_info = st.session_state.audio_file
         
-        # Generate identifiers for the transcript files
         base_filename = os.path.splitext(audio_info['file_name'])[0]
         transcript_filename = f"{base_filename}_{whisper_model}.txt"
         json_filename = f"{base_filename}_{whisper_model}.json"
@@ -307,13 +306,10 @@ if st.session_state.download_complete and st.session_state.audio_file:
         transcript_path = os.path.join("transcripts", transcript_filename)
         json_path = os.path.join("transcripts", json_filename)
         
-        # Check if transcript file already exists to avoid regenerating
         if os.path.exists(transcript_path) and os.path.exists(json_path):
-            # Load existing transcript
             with open(transcript_path, 'r', encoding='utf-8') as f:
                 transcript_text = f.read()
             
-            # Load JSON with segments
             with open(json_path, 'r', encoding='utf-8') as f:
                 transcript_data = json.load(f)
             
@@ -328,7 +324,6 @@ if st.session_state.download_complete and st.session_state.audio_file:
             
             st.success(f"Loaded existing transcript (Whisper {whisper_model})!")
         else:
-            # Generate new transcript
             with st.spinner(f"Generating transcript with Whisper {whisper_model}... This may take a while."):
                 transcript_result = transcribe_with_whisper(
                     audio_info['file_path'], 
@@ -336,11 +331,9 @@ if st.session_state.download_complete and st.session_state.audio_file:
                 )
                 
                 if transcript_result["success"]:
-                    # Save transcript to text file
                     with open(transcript_path, 'w', encoding='utf-8') as f:
                         f.write(transcript_result["transcript"])
                     
-                    # Save full data to JSON for future use
                     with open(json_path, 'w', encoding='utf-8') as f:
                         json.dump({
                             "language": transcript_result["language"],
@@ -356,16 +349,12 @@ if st.session_state.download_complete and st.session_state.audio_file:
                 else:
                     st.error(f"Transcription error: {transcript_result['error']}")
 
-# Display transcript if available
 if st.session_state.transcript and st.session_state.transcript["success"]:
     st.write("## Transcript")
     
-    # Display detected language
     st.write(f"**Detected Language:** {st.session_state.transcript['language']}")
     
-    # Display transcript with or without timestamps
     if show_timestamps and st.session_state.transcript.get("segments"):
-        # Create a formatted transcript with timestamps
         st.write("### Transcript with Timestamps")
         
         for segment in st.session_state.transcript["segments"]:
@@ -373,10 +362,8 @@ if st.session_state.transcript and st.session_state.transcript["success"]:
             end_time = time.strftime('%H:%M:%S', time.gmtime(segment["end"]))
             st.write(f"**[{start_time} - {end_time}]** {segment['text']}")
     else:
-        # Just display the full transcript
         st.write(st.session_state.transcript["transcript"])
     
-    # Provide download links for transcript formats
     st.write("### Download Options")
     col1, col2 = st.columns(2)
     
@@ -409,7 +396,6 @@ st.markdown("4. Click the 'Download Audio' button")
 st.markdown("5. Once download completes, click 'Generate Transcript with Whisper'")
 st.markdown("6. View transcript and download files as needed")
 
-# Disclaimer
 st.markdown("---")
 st.caption("""
 ⚠️ Disclaimer: This application is for personal use only. Please respect copyright laws and YouTube's terms of service.
