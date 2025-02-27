@@ -6,4 +6,5 @@ scipy
 youtube-transcript-api
 openai
 yt-dlp
-whisper
+openai-whisper
+torch
